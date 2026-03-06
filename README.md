@@ -1,36 +1,69 @@
-# auto-adbt — ADB Wireless Manager
+# auto-adbt — adb connection automator for termux
 
-> A Termux shell utility to manage ADB wireless debugging sessions on Android — with guided setup, auto IP/port discovery, and seamless pairing.
+Automates wireless ADB setup on Android from within Termux — no PC needed.
 
 ---
 
-## Features
+## What it does
 
-- **Auto-discovery** of ADB wireless port via `nmap` and device IP via `ifconfig`
-- **Guided setup** — walks you through developer options, wireless debugging, and pairing step by step
-- **In-notification pairing** — prompts for the pairing code directly from the Android notification shade via `termux-notification`
-- **Clean teardown** — disconnects devices, kills stale ADB processes, and resets server state
-- **Status snapshot** — shows current TCP port, PID, and connected devices at a glance
+- Detects your device IP and wireless ADB port automatically
+- Walks you through enabling developer options, USB debugging, and wireless debugging step by step
+- Handles pairing via pairing code (with in-notification reply)
+- Persists the ADB connection over TCP so it survives USB disconnects
+- Gracefully stops and cleans up ADB sessions
+
+---
+
+## Requirements
+
+- [Termux](https://termux.dev)
+- `adb` — `pkg install android-tools`
+- `termux-api` — `pkg install termux-api` + [Termux:API app](https://f-droid.org/packages/com.termux.api/)
+- `python3` — `pkg install python`
+- `zeroconf` — `pip install zeroconf`
+- `get_adbWifi_port.py` and `pairingPort.py` in the same directory
+
+---
 
 ## Usage
 
 ```bash
-bash adbw.sh [start|stop|status]
+bash adbt.sh [start|stop|status]
 ```
 
-| Command  | Description                                              |
-|----------|----------------------------------------------------------|
-| `start`  | Guided flow to establish a wireless ADB connection       |
-| `stop`   | Disconnect devices and kill the ADB server               |
-| `status` | Print current ADB TCP port, PID, and connected devices   |
+| Command  | Description                                      |
+|----------|--------------------------------------------------|
+| `start`  | Interactive setup — guides through full connection flow |
+| `stop`   | Disconnects devices and kills ADB server         |
+| `status` | Shows ADB port, PID, and connected devices       |
 
-## Requirements
+---
 
-- [Termux](https://termux.dev) on Android
-- `adb`, `nmap`, `python3`, `termux-api` installed
-- Developer options & wireless debugging enabled on device
-- `po2.py` present in the same directory (pairing port resolver)
+## Flow overview
+
+```
+start
+ ├─ already connected? → persist & exit
+ ├─ developer options enabled?
+ ├─ USB debugging on?
+ ├─ wireless debugging on?
+ ├─ paired? → pair if not (auto pairing code via notification)
+ ├─ detect port (get_adbWifi_port.py)
+ ├─ detect IP (wlan0 / v4-ccmni1 / v4-ccmni2)
+ ├─ adb connect
+ └─ persist over TCP → exit
+```
+
+---
 
 ## Notes
 
-The `start` command will automatically launch the relevant Android Settings screens if prerequisites aren't met. After a successful connection, it switches ADB to TCP mode (`tcpip 5555`) and disables wireless debugging to save battery.
+- Run from inside a Termux session on the device you want to debug
+- Wireless debugging port changes each session — that's expected
+- `persist_adb` switches to `tcpip 5555` and kills the wireless debugging port so the connection holds without a cable
+
+---
+
+## License
+
+MIT
