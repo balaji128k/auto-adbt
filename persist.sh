@@ -155,7 +155,7 @@ pair(){
         -e :android:show_fragment com.android.settings.development.WirelessDebuggingFragment \
         -e :android:show_fragment_title "Wireless Debugging" >/dev/null 2>&1
     
-    PAIR=$(python po2.py)
+    PAIR=$(python pairingPort.py)
     echo "port: $PAIR"
     if [ -z $PAIR ]; then 
         echo "Pairing port not found. May time out 30s"
