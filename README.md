@@ -66,4 +66,4 @@ start
 
 ## License
 
-MIT
+GNU GPL-2.0
