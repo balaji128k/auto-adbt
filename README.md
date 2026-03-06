@@ -1,4 +1,4 @@
-# adbw — ADB Wireless Manager
+# auto-adbt — ADB Wireless Manager
 
 > A Termux shell utility to manage ADB wireless debugging sessions on Android — with guided setup, auto IP/port discovery, and seamless pairing.
 
