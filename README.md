@@ -24,6 +24,13 @@ Automates wireless ADB setup on Android from within Termux — no PC needed.
 - `get_adbWifi_port.py` and `pairingPort.py` in the same directory
 
 ---
+## Installation
+
+```bash
+git cone https://github.com/balaji128k/auto-adbt.git && cd auto-adbt;
+```
+
+--- 
 
 ## Usage
 
