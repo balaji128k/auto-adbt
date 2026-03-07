@@ -306,8 +306,8 @@ main(){
         status
         ;;
       *)
-        echo "Usage: $0 [start|stop]"
-        echo "but got: $0 $1"
+        echo "Usage: $0 [start|stop|status]"
+        echo "But got: $0 $1"
         exit 1
         ;;
     esac
