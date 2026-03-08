@@ -1,7 +1,19 @@
+# $PREFIX/bin/bash
 echo kabhooom!
 # set -x
-# prerequisites(){
-    
+_is_termux() {
+  [ -d "/data/data/com.termux" ] && \
+  [ -n "$PREFIX" ] && \
+  [[ "$PREFIX" == *"termux"* ]] && \
+  [ -x "$PREFIX/bin" ] && \
+  uname -a | grep -q "Android"
+}
+
+if ! _is_termux; then
+  echo "Not running in Termux environment."
+  echo "Exiting."
+  exit 1
+fi
 
 _confirm() {
     local l="${2:-3}"
@@ -16,27 +28,53 @@ _confirm() {
     return 1
   fi
   printf "\033[${l}A\033[J"
+  unset a;
 }
 # _confirm "Turned on dev options?"
 # exit 0;
 
-_usb_debug_ack() {
-    getprop init.svc.adbd
+_adbd_ack() {
+  getprop init.svc.adbd | grep -q "running"
 }
 
 _get_devices() {
-  local result=$(adb devices 2>/dev/null | grep -A 100 'List of devices attached' | tail -n +2)
-  if [ -z "$result" ]; then
+  local r=$(adb devices 2>/dev/null | grep -A 100 'List of devices attached' | tail -n +2)
+  if [ -z "$r" ]; then
     return 1
   fi
-  echo "$result"
+  echo "$r"
+}
+_USB_Dbug_walkthrough(){
+    echo "Turn on the developer options."
+    echo "Tap on (build number/OS version) number 7 times."
+    echo
+    _confirm "About to launch \"About phone\" settings" 6 || exit 1;
+    echo "Launching settings..."
+    am start -a android.settings.DEVICE_INFO_SETTINGS  >/dev/null 2>&1
+    echo "exiting..."
+    echo "after turning on, just re-run the script."
+    echo "exiting with 1."
+    exit 1;
+}
+_WiLs_debug_walkthrough(){
+    echo "Turn on the wireless debugging."
+    echo
+    _confirm "About to launch wireless debugging settings." 6 || exit 1;
+    echo "Launching wireless debugging..."
+    am start -n com.android.settings/.SubSettings \
+        -e :android:show_fragment com.android.settings.development.WirelessDebuggingFragment \
+        -e :android:show_fragment_title "Wireless Debugging" >/dev/null 2>&1
+        echo "exiting..."
+    echo "just re-run the script after toggling."
+    echo "exiting with 1."
+    exit 1
 }
 _set_port(){
-    if [ "$(_usb_debug_ack)" != "running" ]; then
+    if [ "$(! _adbd_ack)" ]; then
         echo "USB debugging is disabled. Turn on the USB debugging and wireless debugging to set the port."
         echo "and make sure the device is paired."
         echo
-        _confirm "About to launch developer options..." 7 || exit 1;
+        _confirm "About to launch DEVELOPER OPTIONS..." 7 || exit 1;
         echo "Launching developer options..."
         # sleep 2
         am start -n "com.android.settings/.Settings\$DevelopmentSettingsDashboardActivity" >/dev/null 2>&1
@@ -44,11 +82,27 @@ _set_port(){
     fi
     # nmap -sT -p30000-60000 --open localhost | grep '^ *[0-9]' | cut -d/ -f1
     # python3 ~/get_adbWifi_port.py 2>/dev/null
-    PORT=$(python3 get_adbWifi_port.py 2>/dev/null)
+    python3 statics/get_adbWifi_port.py > statics/._port.txt 2>/dev/null &
+    PY_PID=$!
+    SECONDS=0
+    
+    while kill -0 $PY_PID 2>/dev/null; do
+      sleep 0.1
+      if [ $SECONDS -gt 3 ]; then
+        echo "Not yet found, still searching..."
+        echo "Make sure WIRELESS DEBUGGING is turned on and pair the device, if paired, restart it once."
+      fi
+    done
+    
+    PORT=$(cat statics/._port.txt)
+    rm statics/._port.txt 2>/dev/null
+    
     if [[ -z "$PORT" ]]; then
-        echo "Couldn't find port: $PORT"
-        echo "make sure to turn on the wireless debugging and pair the device."
-        exit 1
+      echo "Couldn't find port."
+      echo "Make sure WIRELESS DEBUGGING is turned ON and the device is paired."
+      _confirm "want me to walk you through the process?" 3 || exit 1;
+      _WiLs_debug_walkthrough
+      exit 1
     fi
     echo "ADB port: $PORT"
 }
@@ -64,6 +118,7 @@ _set_ip() {
     done
     # echo "$IP, $candidate"
     echo "No valid IP found."
+    echo "make sure you are connected to a network."
     exit 1
 }
 
@@ -71,6 +126,14 @@ _set_ip() {
     
 # }
 _adb_connection_ack() {
+    if [[ -z "$IP" ]] ; then
+        _set_ip
+    fi
+     
+    if [[ -z "$PORT" ]]; then 
+        _set_port
+    fi
+    
     if [[ -z "$IP" || -z "$PORT" ]]; then
         echo "IP or PORT not set."
         echo IP: $IP
@@ -81,18 +144,65 @@ _adb_connection_ack() {
     adb connect "$IP:$PORT" # | tee /dev/stderr
 }
 persist_adb(){
-    
     echo "hdjjs"
-    
+    echo "execution flow entered persist_adb session."
+    if ! pgrep -x adb >/dev/null 2>&1; then
+        echo "no adb process found."
+        _confirm "want to restart the process?" 1 || exit 1;
+        echo "restarting the whole process from scratch..."
+        start
+        local ec=$?
+        echo "exiting after the whole process is done."
+        exit $ec
+    fi
     echo "printing devices from persistence..."
-    _get_devices || { echo "can't print devices"; kill $(pgrep -x adb); return 1; }
+    if ! pgrep -x adb >/dev/null 2>&1; then
+      echo "No devices found."
+      start
+      local ec=$?
+      echo "assuming that the persistent emulator was connected."
+      echo "and exiting from persistence after calling 'start'"
+      exit $ec
+    fi
+    
+    if ! _get_devices | grep -q "device"; then
+      echo "Devices found but none are valid:"
+      _get_devices
+      adb disconnect 
+      echo "trying to pair..."
+      _adb_connection_ack
+    fi
+    if ! _get_devices | grep -q "device"; then
+      echo "Devices found but none are valid:"
+      echo printing devices: 
+      _get_devices
+      echo
+      echo "disconnecting everything with 'adb disconnect'..."
+      adb disconnect
+      echo "printing devices: "
+      _get_devices
+      echo "exiting..."
+      exit 1;
+    fi
+    
     # (_get_devices || echo "can't print devices") && return 1;
     # sleep 10
+    
+    local r=$(pgrep -x adb);
+    echo "pgrep -x adb: $r"
+    unset r;
+    _get_devices
     echo "starting adb tunnel as tcp..."
-    result=$(adb tcpip 5555)
-    if ! echo "$result" | grep -q "TCP"; then
-      echo "can't connect to tcp ip: $result"
-      return 1
+    adb tcpip 5555 # >/dev/null 2>&1
+    sleep 1
+    if nc -z localhost 5555; then
+      echo "TCP mode enabled."
+    else
+        
+      echo "Failed to enable TCP mode."
+      echo "printing devices: "
+      _get_devices
+      
     fi
     echo
     # sleep 2
@@ -111,8 +221,8 @@ persist_adb(){
     exit 0;
 }
 
-_post_pairing_notification(){
-    local REPLY_FILE="/data/data/com.termux/files/home/.tmp/reply.txt"
+_get_pairing_code(){
+    local REPLY_FILE="statics/.reply.txt"
     rm -f "$REPLY_FILE"     # clean previous if exists
     
     termux-toast "Notification posted." 
@@ -121,10 +231,10 @@ _post_pairing_notification(){
     # Show notification with inline reply
     termux-notification \
       --id 24 \
-      --title "Enter text" \
-      --content "Type below and send" \
+      --title "Pairing device found" \
+      --content "Type pairing code below" \
       --priority max \
-      --button1 "Send" \
+      --button1 "Enter" \
       --button1-action "echo \"\$REPLY\" > \"$REPLY_FILE\""
     
     echo "Waiting for your reply..."
@@ -146,45 +256,65 @@ _post_pairing_notification(){
 # _adb_connection_ack
 pair(){
     echo "pairing..."
-    echo "just click on 'pair device with pairing code'"
+    echo "Click on 'pair device with pairing code' before 10s-15s after app gets opened."
+    echo "after few(2s-3s) seconds, you'll get a notification, enter the pairing code there."
+    _confirm "About to launch wireless debugging settings..." || exit 1;
     echo
-    _confirm "okay? [Y|n]"
-    echo "starting..."
-    echo "Launching wireless debugging settings."
+    echo "Launching..."
     am start -n com.android.settings/.SubSettings \
         -e :android:show_fragment com.android.settings.development.WirelessDebuggingFragment \
         -e :android:show_fragment_title "Wireless Debugging" >/dev/null 2>&1
     
-    PAIR=$(python pairingPort.py)
+    PAIR=$(python statics/pairingPort.py)
     echo "port: $PAIR"
     if [ -z $PAIR ]; then 
         echo "Pairing port not found. May time out 30s"
         exit 1;
     fi
-    _post_pairing_notification
-    echo "reply: $REPLY"
+    _get_pairing_code
+    echo "Pairing code: $REPLY"
     
     echo "$REPLY" | adb pair "$PAIR"
     
 }
 stop(){
     echo "Stopping..."
-    if ! pgrep -x adb ; then
+    if ! pgrep -x adb >/dev/null 2>&1 ; then
         echo "no adb process found, exiting."
         exit 0;
     fi
-    if [ -z "$(_get_devices)" ]; then
+    echo "adb process found: $(pgrep -x adb)"
+    if ! _get_devices >/dev/null 2>&1 ; then
         echo "No devices attached."
+        echo "killing adb process..."
         kill -9 "$(pgrep -x adb)" >/dev/null 2>&1
         exit 0;
     fi
+    echo "devices found: $(_get_devices)"
     if _get_devices | grep -q '^emulator'; then
         echo "Emulator found:"
         _get_devices
-        echo emulator section 
+        echo "emulator section" 
         # adb disconnect emulator-5554
         adb usb
+        
+        echo "disconnecting everything..."
+        adb disconnect
+        
+        echo "killing adb server with 'adb kill-server'..." 
         adb kill-server
+        
+        echo "making sure there are no residues..."
+        
+        local p=$(pgrep -x adb)
+        if [ -n "$p" ] && ! kill -9 "$p" 2>/dev/null; then
+            echo "ADB process found but couldn't kill it. exiting."
+            exit 1;
+        fi
+        echo "adb pid gets printed if adb is still running."
+        echo "adb pid: $(pgrep -x adb)";
+        
+        exit 0;
         # pkill -9 -f $(which adb)
         # pkill -9 -f "$(pgrep -x adb)"
         # exit 0;
@@ -210,52 +340,35 @@ start(){
     if [ -n "$(pgrep -x adb)" ]; then
         echo "adb process found."
         if _get_devices | grep -q device; then 
-            echo "found connected devices."
+            echo "found online connected devices."
             _get_devices
             if ! _get_devices | grep -q '^emulator'; then
                 echo "but no emulators found."
                 persist_adb
             fi
+            echo "persistent emulator found."
+            echo "printing devices: "
+            _get_devices
+            echo "exiting..."
+            exit 0
         fi
+        echo "no valid device found"
     fi
     echo "adb is not connected."
+    echo "starting from scratch..."
     echo
+    
     # local r=_confirm "Do you turned on developer options?"
     if ! _confirm "Do you turned on developer options?"; then 
-        echo "Turn on the developer options."
-        echo "Tap on (build number/OS version) number 7 times."
-        echo
-        _confirm "About to launch \"About phone\" settings" 6 || exit 1;
-        echo "Launching settings..."
-        am start -a android.settings.DEVICE_INFO_SETTINGS  >/dev/null 2>&1
-        exit 1;
-
-    fi
-    if [ "$(_usb_debug_ack)" != "running" ]; then
-        echo "USB debugging isn't turned on."
-        _confirm "Want me to take to dev screen?" 4
-        echo "Launching dev screen..."
-        
-        am start -n "com.android.settings/.Settings\$DevelopmentSettingsDashboardActivity" >/dev/null 2>&1
-        
-        
+        _USB_Dbug_walkthrough
         exit 1;
     fi
-    
     if ! _confirm "Do you turned on wireless debugging?" ; then 
-        echo "Turn on the wireless debugging."
-        echo
-        _confirm "About to launch wireless debugging settings." 6 || exit 1;
-        echo "Launching wireless debugging..."
-        am start -n com.android.settings/.SubSettings \
-            -e :android:show_fragment com.android.settings.development.WirelessDebuggingFragment \
-            -e :android:show_fragment_title "Wireless Debugging" >/dev/null 2>&1
-        
-        exit 1
+        _WiLs_debug_walkthrough
+        exit 1;
     fi
     if ! _confirm "Is your device paired?" ; then 
         pair
-        
         exit 1;
     fi
     
@@ -276,10 +389,20 @@ start(){
     echo
     # result=$(adb connect "$IP:$PORT")
     # echo "$result"
-    if ! _adb_connection_ack | grep -q "connected" >/dev/null 2>&1; then
+    echo "Establishing initial adb connection..."
+    local r=$(_adb_connection_ack)
+    if ! echo "$r" | grep -q "connected"; then
         echo "Failed to connect, make sure to pair first using pairing code or ip and port are invalid."
+        echo "$r";
+        if ! _confirm "Do you want me to guide through the painting process?" 2 ; then
+            echo "do it manually than, bye."
+            exit 1;
+        fi
         pair
         # _adb_connection_ack
+        if [[ -n "$REPLY" && -n "$PAIR" ]]; then
+          _confirm "pairing successful, want to continue further?" || { echo "exiting..."; exit 1; }
+        fi
         exit 1
     fi
     
@@ -307,13 +430,23 @@ main(){
         ;;
       *)
         echo "Usage: $0 [start|stop|status]"
-        echo "But got: $0 $1"
+        echo "but got: $0 $1"
         exit 1
         ;;
     esac
 }
 main "$@"
-exit 0;
+exit 0; ### <=== script officially ended
+if [ "$(_usb_debug_ack)" != "running" ]; then
+        echo "USB debugging isn't turned on."
+        _confirm "Want me to take to dev screen?" 4 || { echo "exiting" ; exit 1 }
+        echo "Launching dev screen..."
+        
+        am start -n "com.android.settings/.Settings\$DevelopmentSettingsDashboardActivity" >/dev/null 2>&1
+        
+        
+        exit 1;
+    fi
 for interface in wlan0 v4-ccmni1 v4-ccmni2; do
         local candidate=$(ifconfig 2>/dev/null | grep -A 3 "$interface" | grep 'inet ' | awk '{print $2}')
         [ -z "$candidate" ] && continue
