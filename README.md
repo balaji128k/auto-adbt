@@ -73,4 +73,4 @@ start
 
 ## License
 
-GNU GPL-2.0
+GNU - GPL-2.0
