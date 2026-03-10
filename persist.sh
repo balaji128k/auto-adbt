@@ -282,7 +282,15 @@ persist_adb(){
         exit 1
     fi
     # _confirm "Want to turn off wireless debugging?" || { echo "keeping wireless debugging on"; exit 0 }
-    
+    echo
+    echo "All set."
+    echo
+
+    echo "Sometimes you have to pat yourself on the back and say, 'Good job' — because no one else will do it for you.";
+
+    echo
+
+    echo "The most important relationship in your life is the relationship you have with yourself.";
     
     echo
     
