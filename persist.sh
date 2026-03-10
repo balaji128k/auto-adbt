@@ -5,15 +5,32 @@ _is_termux() {
   [ -d "/data/data/com.termux" ] && \
   [ -n "$PREFIX" ] && \
   [[ "$PREFIX" == *"termux"* ]] && \
-  [ -x "$PREFIX/bin" ] && \
+  [ -d "$PREFIX/bin" ] && \
   uname -a | grep -q "Android"
 }
 
+_battery_low() {
+  local level=$(termux-battery-status | grep "percentage" | awk '{print $2}' | tr -d ',')
+  [ "$level" -lt 21 ]
+}
+
+echo "checking if everything was fine before starting the execution."
+echo "checking if the execution environment is termux..."
 if ! _is_termux; then
   echo "Not running in Termux environment."
   echo "Exiting."
   exit 1
 fi
+echo "execution environment is termux."
+echo "checking is the battery was low..."
+if _battery_low; then 
+    echo "battery is running low, charge the battery, else the background processes were getting killed unexpectedly making this script run unpredictably."
+    echo "exiting with 1..."
+    exit 1;
+fi
+echo "the battery was high enough to run this script predictably."
+echo "continuing the execution..."
+
 
 _confirm() {
     local l="${2:-3}"
@@ -43,8 +60,15 @@ _get_devices() {
     return 1
   fi
   echo "$r"
+  return
 }
-_USB_Dbug_walkthrough(){
+_USB_dbug_walkthrough(){
+    echo "Turn on USB debugging on the next screen."
+    echo "launching dev screens..."
+    am start -a android.settings.APPLICATION_DEVELOPMENT_SETTINGS
+    return
+}
+_dev_ops_walkthrough(){
     echo "Turn on the developer options."
     echo "Tap on (build number/OS version) number 7 times."
     echo
@@ -54,7 +78,7 @@ _USB_Dbug_walkthrough(){
     echo "exiting..."
     echo "after turning on, just re-run the script."
     echo "exiting with 1."
-    exit 1;
+    return
 }
 _WiLs_debug_walkthrough(){
     echo "Turn on the wireless debugging."
@@ -67,7 +91,7 @@ _WiLs_debug_walkthrough(){
         echo "exiting..."
     echo "just re-run the script after toggling."
     echo "exiting with 1."
-    exit 1
+    return
 }
 _set_port(){
     if [ "$(! _adbd_ack)" ]; then
@@ -89,8 +113,10 @@ _set_port(){
     while kill -0 $PY_PID 2>/dev/null; do
       sleep 0.1
       if [ $SECONDS -gt 3 ]; then
-        echo "Not yet found, still searching..."
+        echo -e "Not yet found, still searching..."
         echo "Make sure WIRELESS DEBUGGING is turned on and pair the device, if paired, restart it once."
+        sleep 0.75
+        printf "\033[3A\033[J"
       fi
     done
     
@@ -160,7 +186,7 @@ persist_adb(){
       echo "No devices found."
       start
       local ec=$?
-      echo "assuming that the persistent emulator was connected."
+      # echo "assuming that the persistent emulator was connected."
       echo "and exiting from persistence after calling 'start'"
       exit $ec
     fi
@@ -198,7 +224,15 @@ persist_adb(){
     if nc -z localhost 5555; then
       echo "TCP mode enabled."
     else
-        
+        if ! _get_devices | grep -q device; then 
+            echo "no valid device found."
+            _get_devices
+            echo "disconnecting everything..."
+            adb disconnect 
+            _confirm "want to start the process from scratch?" || exit 1
+            start
+            exit
+        fi
       echo "Failed to enable TCP mode."
       echo "printing devices: "
       _get_devices
@@ -213,11 +247,31 @@ persist_adb(){
     echo "starting fresh adb server..."
     adb start-server 2>/dev/null
     # sleep 2
-    echo "turning off wireless debugging."
-    adb shell settings put global adb_wifi_enabled 0;
-    echo
     echo "printing devices: "
-    _get_devices 
+    _get_devices
+    if _get_devices | grep -q '^emulator'; then
+        adb shell settings put global adb_wifi_enabled 0;
+        if ! _get_devices | grep -q '^emulator'; then
+            echo "turn off both USB debugging and wireless debugging, then turn USB debugging back on."
+            _confirm "do you want a persistent adb connection without much battery loss?" || exit 1;
+            echo "launching dev options..."
+            _USB_dbug_walkthrough
+            printing devices 
+            if _get_devices | grep -q '^emulator'; then exit 0; fi
+            exit 1;
+        fi
+    fi
+    if ! _get_devices | grep -q '^emulator' || ! _adbd_ack; then
+        echo "you must turn on atleast one of USB debugging or wireless debugging."
+        echo "devices: $(_get_devices)"
+        echo "exiting with 1"
+        exit 1
+    fi
+    # _confirm "Want to turn off wireless debugging?" || { echo "keeping wireless debugging on"; exit 0 }
+    
+    
+    echo
+    
     exit 0;
 }
 
@@ -273,19 +327,27 @@ pair(){
     fi
     _get_pairing_code
     echo "Pairing code: $REPLY"
-    
-    echo "$REPLY" | adb pair "$PAIR"
+    if echo "$REPLY" | adb pair "$IP:$PORT" | grep -q "Successfully" ; then 
+        echo "Paired!" 
+        return 0
+    else 
+        echo "Pairing failed"
+        return 1
+    fi
+    # echo "$REPLY" | adb pair "$PAIR"
     
 }
 stop(){
     echo "Stopping..."
-    if ! pgrep -x adb >/dev/null 2>&1 ; then
-        echo "no adb process found, exiting."
+    if pgrep -x adb >/dev/null 2>&1 ; then
+        echo "adb process found: $(pgrep -x adb)"
         exit 0;
     fi
-    echo "adb process found: $(pgrep -x adb)"
+    adb start-server;
     if ! _get_devices >/dev/null 2>&1 ; then
         echo "No devices attached."
+        adb disconnect
+        adb usb
         echo "killing adb process..."
         kill -9 "$(pgrep -x adb)" >/dev/null 2>&1
         exit 0;
@@ -337,30 +399,39 @@ start(){
     clear
     echo "checking whether the adb is already connected..."
     
-    if [ -n "$(pgrep -x adb)" ]; then
-        echo "adb process found."
-        if _get_devices | grep -q device; then 
-            echo "found online connected devices."
-            _get_devices
-            if ! _get_devices | grep -q '^emulator'; then
-                echo "but no emulators found."
-                persist_adb
-            fi
-            echo "persistent emulator found."
-            echo "printing devices: "
-            _get_devices
-            echo "exiting..."
-            exit 0
-        fi
-        echo "no valid device found"
+    if [ -z "$(pgrep -x adb)" ]; then
+        echo "adb process not found."
+        echo "starting..."
+        adb start-server
     fi
-    echo "adb is not connected."
+    if _get_devices | grep -q device; then 
+        echo "found online connected devices."
+        _get_devices
+        if ! _get_devices | grep -q '^emulator'; then
+            echo "but no emulators found."
+            persist_adb
+        fi
+        echo "persistent emulator found."
+        echo "printing devices: "
+        _get_devices
+        echo "exiting..."
+        exit 0
+    fi
+    echo "no valid device found"
+    
+    # echo "adb is not connected."
     echo "starting from scratch..."
     echo
     
     # local r=_confirm "Do you turned on developer options?"
     if ! _confirm "Do you turned on developer options?"; then 
-        _USB_Dbug_walkthrough
+        _dev_ops_walkthrough
+        exit 1;
+    fi
+    
+    if ! _confirm "Do you turned on USB debugging?" ; then 
+        _USB_dbug_walkthrough
+        echo "just re-run the script after toggling."
         exit 1;
     fi
     if ! _confirm "Do you turned on wireless debugging?" ; then 
@@ -368,8 +439,8 @@ start(){
         exit 1;
     fi
     if ! _confirm "Is your device paired?" ; then 
-        pair
-        exit 1;
+        pair || exit 1
+        
     fi
     
     
@@ -437,16 +508,17 @@ main(){
 }
 main "$@"
 exit 0; ### <=== script officially ended
+
 if [ "$(_usb_debug_ack)" != "running" ]; then
-        echo "USB debugging isn't turned on."
-        _confirm "Want me to take to dev screen?" 4 || { echo "exiting" ; exit 1 }
-        echo "Launching dev screen..."
-        
-        am start -n "com.android.settings/.Settings\$DevelopmentSettingsDashboardActivity" >/dev/null 2>&1
-        
-        
-        exit 1;
-    fi
+    echo "USB debugging isn't turned on."
+    _confirm "Want me to take to dev screen?" 4 || { echo "exiting" ; exit 1 }
+    echo "Launching dev screen..."
+    
+    am start -n "com.android.settings/.Settings\$DevelopmentSettingsDashboardActivity" >/dev/null 2>&1
+    
+    
+    exit 1;
+fi
 for interface in wlan0 v4-ccmni1 v4-ccmni2; do
         local candidate=$(ifconfig 2>/dev/null | grep -A 3 "$interface" | grep 'inet ' | awk '{print $2}')
         [ -z "$candidate" ] && continue
