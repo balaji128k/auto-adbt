@@ -93,6 +93,17 @@ _WiLs_debug_walkthrough(){
     echo "exiting with 1."
     return
 }
+_cleanup() {
+  echo "Interrupted. Cleaning up..."
+  kill -9 $PY_PID 2>/dev/null
+  adb usb 2>/dev/null
+  adb disconnect 2>/dev/null
+  rm statics/._port.txt 2>/dev/null
+  adb kill-server 2>/dev/null
+  kill -9 $(pgrep -x adb) 2>/dev/null
+  
+  exit 1
+}
 _set_port(){
     if [ "$(! _adbd_ack)" ]; then
         echo "USB debugging is disabled. Turn on the USB debugging and wireless debugging to set the port."
@@ -106,6 +117,9 @@ _set_port(){
     fi
     # nmap -sT -p30000-60000 --open localhost | grep '^ *[0-9]' | cut -d/ -f1
     # python3 ~/get_adbWifi_port.py 2>/dev/null
+    
+    trap _cleanup SIGINT
+    
     python3 statics/get_adbWifi_port.py > statics/._port.txt 2>/dev/null &
     PY_PID=$!
     SECONDS=0
@@ -397,6 +411,7 @@ stop(){
 }
 start(){
     clear
+    trap _cleanup SIGINT
     echo "checking whether the adb is already connected..."
     
     if [ -z "$(pgrep -x adb)" ]; then
