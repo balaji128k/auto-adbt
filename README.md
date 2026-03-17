@@ -16,12 +16,11 @@ Automates wireless ADB setup on Android from within Termux — no PC needed.
 
 ## Requirements
 
-- [Termux](https://termux.dev)
+- [Termux](https://github.com/termux/termux-app)
 - `adb` — `pkg install android-tools`
-- `termux-api` — `pkg install termux-api` + [Termux:API app](https://f-droid.org/packages/com.termux.api/)
+- `termux-api` — `pkg install termux-api` + [Termux:API app](https://github.com/termux/termux-api)
 - `python3` — `pkg install python`
 - `zeroconf` — `pip install zeroconf`
-- `get_adbWifi_port.py` and `pairingPort.py` in the same directory
 
 ---
 ## Installation
