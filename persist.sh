@@ -14,24 +14,6 @@ _battery_low() {
   [ "$level" -lt 21 ]
 }
 
-echo "checking if everything was fine before starting the execution."
-echo "checking if the execution environment is termux..."
-if ! _is_termux; then
-  echo "Not running in Termux environment."
-  echo "Exiting."
-  exit 1
-fi
-echo "execution environment is termux."
-echo "checking is the battery was low..."
-if _battery_low; then 
-    echo "battery is running low, charge the battery, else the background processes were getting killed unexpectedly making this script run unpredictably."
-    echo "exiting with 1..."
-    exit 1;
-fi
-echo "the battery was high enough to run this script predictably."
-echo "continuing the execution..."
-
-
 _confirm() {
     local l="${2:-3}"
   echo "$1, if yes, then continue."
@@ -418,6 +400,23 @@ stop(){
     
 }
 start(){
+    echo "checking if everything was fine before starting the execution."
+    echo "checking if the execution environment is termux..."
+    if ! _is_termux; then
+        echo "Not running in Termux environment."
+        echo "Exiting."
+        exit 1
+    fi
+    echo "execution environment is termux."
+    echo "checking is the battery was low..."
+    if _battery_low; then 
+        echo "battery is running low, charge the battery, else the background processes were getting killed unexpectedly making this script run unpredictably."
+        echo "exiting with 1..."
+        exit 1;
+    fi
+    echo "the battery was high enough to run this script predictably."
+    echo "continuing the execution..."
+
     clear
     trap _cleanup SIGINT
     echo "checking whether the adb is already connected..."
